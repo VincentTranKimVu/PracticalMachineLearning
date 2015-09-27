@@ -425,15 +425,15 @@ subset(pmlTesting, select=names(pmlTesting)[grep(&quot;belt|[^(fore)]arm|dumbbel
 <div id="step-5-generate-prediction-result-files" class="section level2">
 <h2>Step 5: Generate prediction result files</h2>
 <p>Apply to the 20 test cases available in the test data.</p>
-<pre class="r"><code>save_files = function(x){
+<pre class="r"><code>pml_write_files  = function(x){
   n = length(x)
   path &lt;- &quot;submission&quot;
   for(i in 1:n){
-    filename = paste0(&quot;case_&quot;,i,&quot;.txt&quot;)
+    filename = paste0(&quot;problem_id_&quot;,i,&quot;.txt&quot;)
     write.table(x[i],file=file.path(path, filename),quote=FALSE,row.names=FALSE,col.names=FALSE)
   }
 }
-save_files(predictModel)</code></pre>
+pml_write_files (predictModel)</code></pre>
 </div>
 
 

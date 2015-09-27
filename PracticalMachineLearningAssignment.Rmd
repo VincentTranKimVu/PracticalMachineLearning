@@ -193,13 +193,13 @@ subset(pmlTesting, select=names(pmlTesting)[grep("belt|[^(fore)]arm|dumbbell|for
 Apply to the 20 test cases available in the test data.
 
 ```{r}
-save_files = function(x){
+pml_write_files  = function(x){
   n = length(x)
   path <- "submission"
   for(i in 1:n){
-    filename = paste0("case_",i,".txt")
+    filename = paste0("problem_id_",i,".txt")
     write.table(x[i],file=file.path(path, filename),quote=FALSE,row.names=FALSE,col.names=FALSE)
   }
 }
-save_files(predictModel)
+pml_write_files (predictModel)
 ```
