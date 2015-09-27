@@ -1,0 +1,205 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Vu Tran"
+date: "Sunday, Sep 27, 2015"
+output: html_document
+keep_md: true
+---
+
+##Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+##Data
+
+The training data for this project are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here: 
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+##Prequisitions
+The below libraries must be installed before running this program:
+install.packages("data.table")
+install.packages("curl")
+install.packages("caret")
+install.packages("doParallel")
+install.packages("randomForest")
+install.packages("e1071")
+
+## Step 1: Data preparation
+
+```{r}
+#Include libraries
+library(data.table)
+library(randomForest)
+library(caret)
+library(parallel)
+library(doParallel)
+
+setInternet2(TRUE)
+
+#Load the training data.
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+pmlTraining <- fread(url)
+
+#Load the testing data.
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+pmlTesting <- fread(url)
+```
+
+### Clean Test Data before processing.
+
+```{r}
+isAnyMissing <- sapply(pmlTesting, function (x) any(is.na(x) | x == ""))
+isPredictor <- !isAnyMissing & grepl("belt|[^(fore)]arm|dumbbell|forearm", names(isAnyMissing))
+predCandidates <- names(isAnyMissing)[isPredictor]
+predCandidates
+```
+
+### Create dataset for predictor and outcome variable.
+
+```{r}
+varToInclude <- c("classe", predCandidates)
+pmlTraining <- pmlTraining[, varToInclude, with=FALSE]
+dim(pmlTraining)
+names(pmlTraining)
+```
+
+Convert to a factor.
+
+```{r}
+pmlTraining <- pmlTraining[, classe := factor(pmlTraining[, classe])]
+pmlTraining[, .N, classe]
+```
+
+### Split the dataset into a training and testing dataset (60% - 40%).
+
+```{r}
+
+set.seed(1234)
+inTrain <- createDataPartition(pmlTraining$classe, p=0.6)
+dataTrain <- pmlTraining[inTrain[[1]]]
+dataTest <- pmlTraining[-inTrain[[1]]]
+```
+
+### Do pre-process the prediction variables.
+
+```{r}
+X <- dataTrain[, predCandidates, with=FALSE]
+preProc <- preProcess(X)
+preProc
+XCS <- predict(preProc, X)
+dataTrainCS <- data.table(data.frame(classe = dataTrain[, classe], XCS))
+```
+
+Apply the centering and scaling to the test dataset.
+
+```{r}
+X <- dataTest[, predCandidates, with=FALSE]
+XCS <- predict(preProc, X)
+dataTestCS <- data.table(data.frame(classe = dataTest[, classe], XCS))
+```
+
+Check for near zero variance.
+
+```{r}
+nzv <- nearZeroVar(dataTrainCS, saveMetrics=TRUE)
+if (any(nzv$nzv)) nzv else message("No near zero variance")
+```
+
+
+## Step 2: Train the prediction model with random forest
+
+### Define the parallel clusters and control parameters.
+
+```{r}
+
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+ctrl <- trainControl(classProbs=TRUE,
+                     savePredictions=TRUE,
+                     allowParallel=TRUE)
+```
+
+### Create training model with random forest.
+
+```{r}
+#Delete trainingModel.RData if you want to run the training model again
+if (file.exists("trainingModel.RData")) {
+  load("trainingModel.RData") 
+  } else {
+    trainingModel <- train(classe ~ ., data=dataTrainCS, method="rf")
+  }
+```
+
+Stop the clusters.
+
+```{r}
+stopCluster(cl)
+```
+
+## Step 3: Evaluate the training model
+### Evaludate with training data.
+
+```{r}
+trainingModel
+predictModel <- predict(trainingModel, dataTrainCS)
+confusionMatrix(predictModel, dataTrain[, classe])
+```
+
+### Evaluate with test data.
+
+```{r}
+predictModel <- predict(trainingModel, dataTestCS)
+confusionMatrix(predictModel, dataTestCS[, classe])
+```
+
+### Show the final model.
+
+```{r finalModel}
+varImp(trainingModel)
+trainingModel$finalModel
+```
+
+The error rate is just 0.83%, it is met the expectation (<1%).
+
+Save training model object for re-used.
+
+```{r}
+save(trainingModel, file="trainingModel.RData")
+```
+
+
+## Step 4: Execute predictions on the test dataset
+
+###Load the training model.
+
+```{r}
+load(file="trainingModel.RData", verbose=TRUE)
+```
+
+### Get predictions and do evaluation.
+
+```{r}
+DTestCS <- predict(preProc, pmlTesting[, predCandidates, with=FALSE])
+predictModel <- predict(trainingModel, DTestCS)
+pmlTesting <- cbind(predictModel , pmlTesting)
+subset(pmlTesting, select=names(pmlTesting)[grep("belt|[^(fore)]arm|dumbbell|forearm", names(pmlTesting), invert=TRUE)])
+```
+
+## Step 5: Generate prediction result files
+
+Apply to the 20 test cases available in the test data.
+
+```{r}
+save_files = function(x){
+  n = length(x)
+  path <- "submission"
+  for(i in 1:n){
+    filename = paste0("case_",i,".txt")
+    write.table(x[i],file=file.path(path, filename),quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+save_files(predictModel)
+```
